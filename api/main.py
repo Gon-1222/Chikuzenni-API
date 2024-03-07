@@ -269,7 +269,7 @@ def teacher_signup():
             "name": teacher_name,
             "password_hash": hash_password,
             "status": 1,
-            "status_list": ["在室", "不在"],
+            "status_list": ["在室", "不在", "初期値1", "初期値2", "初期値3"],
             "subject": [],
             "uuid": teacher_uuid,
             "created_at": firestore.SERVER_TIMESTAMP,
