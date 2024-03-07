@@ -188,10 +188,18 @@ def student_list(uuid):
     teacher_token_list = []
     # studentのtoken取り出し
     for student_token_data in all_student_data:
-        student_token_list.append(student_token_data.get("token"))
+        try:
+            # ISSUE tokenがない(認証されていない)アカウントでerrorが出る
+            student_token_list.append(student_token_data.get("token"))
+        except:
+            pass
     # teacherのtoken取り出し
     for teacher_token_data in all_teacher_data:
-        teacher_token_list.append(teacher_token_data.get("token"))
+        try:
+            # ISSUE tokenがない(認証されていない)アカウントでerrorが出る
+            teacher_token_list.append(teacher_token_data.get("token"))
+        except:
+            pass
     all_token_list = student_token_list + teacher_token_list
     if token not in all_token_list:
         return jsonify({"message": "アクセスが拒否されました。"}), 401
