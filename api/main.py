@@ -1,7 +1,7 @@
 import os
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import firebase_admin
@@ -37,6 +37,19 @@ cred = credentials.Certificate(fs_dict)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 app.config["SECRET_KEY"] = "3782c00aae1e468f9809d8d34011a84d"
+
+email_pattern = "^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+pass_pattern = "^(?=.[A-Z])(?=.[-!\"#$%&'()+,./:;<=>?@[\]^_`{|}~])[A-Za-z0-9-!\"#$%&'()+,./:;<=>?@[\]^_`{|}~]{8,72}$"
+
+veri_message = """
+    認証用リンク
+    http://localhost:3000/{role}/available/{uuid}?secret={secret}
+    """
+
+forget_message = """
+    パスワード忘れた場合
+    http://localhost:3000/{role}/forget/{uuid}?secret={secret}
+    """
 
 
 # teacher側GET
@@ -241,41 +254,61 @@ def teacher_signup():
     teacher_name = teacher.get("name")
     machine_id = teacher.get("machine")
     teacher_email = teacher.get("email")
+    teacher_password = teacher.get("password")
     if teacher_name == None:
         return jsonify({"message": "nameがありません。"}), 400
     elif machine_id == None:
         return jsonify({"message": "machineがありません。"}), 400
     elif teacher_email == None:
         return jsonify({"message": "emailがありません。"}), 400
-
+    if teacher_password == None:
+        return jsonify({"message": "passwordがありません。"}), 400
     # 正規表現
-    pattern = "^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-    if not re.fullmatch(pattern, teacher_email):
+    if not re.fullmatch(email_pattern, teacher_email):
         return jsonify({"message": "間違ったメールアドレス形式"}), 406
 
     teacher_uuid = str(uuid.uuid4())
-    teacher_password = teacher.get("password")
-    if teacher_password == None:
-        return jsonify({"message": "passwordがありません。"}), 400
 
     b_password = bytes(teacher_password, "utf-8")
     salt = bcrypt.gensalt(rounds=12, prefix=b"2b")
     hash_password = bcrypt.hashpw(b_password, salt)
-    db.collection("teacher").document(teacher_uuid).set(
+    result = (
+        db.collection("teacher")
+        .document(teacher_uuid)
+        .set(
+            {
+                "available": False,
+                "email": teacher_email,
+                "machine_id": machine_id,
+                "name": teacher_name,
+                "password_hash": hash_password,
+                "status": 1,
+                "status_list": ["在室", "不在", "会議", "すぐ戻ります", "帰宅"],
+                "subject": [],
+                "uuid": teacher_uuid,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    )
+    secret = str(uuid.uuid4())
+    expired = datetime.fromtimestamp(result.update_time.timestamp(), tz=timezone.utc)
+    expired = expired + timedelta(minutes=10)
+    db.collection("teacher").document(teacher_uuid).update(
         {
-            "available": False,
-            "email": teacher_email,
-            "machine_id": machine_id,
-            "name": teacher_name,
-            "password_hash": hash_password,
-            "status": 1,
-            "status_list": ["在室", "不在", "会議", "すぐ戻ります", "帰宅"],
-            "subject": [],
-            "uuid": teacher_uuid,
-            "created_at": firestore.SERVER_TIMESTAMP,
+            "secret": {"secret": secret, "expired_at": expired},
         }
     )
-    # requests.post("https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",headers="Content-Type: application/json",json={"body":"ボディ","email":teacher_email,"subject":"メールアドレス認証"})
+    message = veri_message.format(role="teacher", uuid=teacher_uuid, secret=secret)
+    resquest_json = {
+        "body": message,
+        "email": teacher_email,
+        "subject": "メールアドレス認証",
+    }
+    requests.post(
+        "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
+        headers={"Content-Type": "application/json"},
+        json=resquest_json,
+    )
     return jsonify({"message": "success", "email": teacher_email}), 200
 
 
@@ -365,8 +398,19 @@ def teacher_forget():
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
     )
-    url = "https://teacher/forget/:uuid?secret=" + secret
-    # requests.post(url,headers="Content-Type: application/json",json={"body":"ボディ","email":teacher_email,"subject":"パスワード変更"})
+    message = forget_message.format(
+        role="teacher", uuid=teacher_data.get("uuid"), secret=secret
+    )
+    resquest_json = {
+        "body": message,
+        "email": teacher_email,
+        "subject": "パスワード変更",
+    }
+    requests.post(
+        "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
+        headers={"Content-Type": "application/json"},
+        json=resquest_json,
+    )
     return jsonify({"message": "success"}), 200
 
 
@@ -617,6 +661,30 @@ def teacher_forget_password(uuid):
     )
     return jsonify({"message": "success"}), 200
 
+@app.route("/teacher/<string:uuid>/available/", methods=["POST"])
+def teacher_available(uuid):
+    request_json = request.get_json()
+    request_secret = request_json.get("secret")
+    if request_secret == None:
+        return jsonify({"message": "secretがありません。"}), 400
+
+    teacher_secret = db.collection("teacher").document(uuid).get().get("secret")
+    secret_secret = teacher_secret.get("secret")
+    if request_secret != secret_secret:
+        return jsonify({"message": "間違ったsecret"}), 400
+
+    now = datetime.now()
+    teacher_expired = teacher_secret.get("expired_at")
+    expired_datetime = datetime.fromtimestamp(teacher_expired.timestamp())
+    sub_time = expired_datetime - now
+    if sub_time.total_seconds() < 0:
+        return jsonify({"message": "期限切れのsecret"}), 400
+
+    db.collection("teacher").document(uuid).update(
+        {"available": True, "updated_at": firestore.SERVER_TIMESTAMP}
+    )
+    return jsonify({"message": "success"}), 200
+
 
 # #student側POST
 @app.route("/student/signup/", methods=["POST"])
@@ -624,36 +692,61 @@ def student_signup():
     student = request.get_json()
     student_name = student.get("name")
     student_email = student.get("email")
+    student_password = student.get("password")
+
     if student_name == None:
         return jsonify({"message": "nameがありません。"}), 400
     elif student_email == None:
         return jsonify({"message": "emailがありません。"}), 400
-
+    if student_password == None:
+        return jsonify({"message": "passwordがありません。"}), 400
     # 正規表現
-    pattern = "^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-    if not re.fullmatch(pattern, student_email):
+    if not re.fullmatch(email_pattern, student_email):
         return jsonify({"message": "間違ったメールアドレス形式"}), 406
+    # if not re.fullmatch(pass_pattern, student_password):
+    #     return jsonify({"message": "間違ったパスワード形式"}), 406
 
     student_uuid = str(uuid.uuid4())
-    teacher_password = student.get("password")
-    if teacher_password == None:
-        return jsonify({"message": "passwordがありません。"}), 400
 
-    b_password = bytes(teacher_password, "utf-8")
+    b_password = bytes(student_password, "utf-8")
     salt = bcrypt.gensalt(rounds=12, prefix=b"2b")
     hash_password = bcrypt.hashpw(b_password, salt)
-    db.collection("student").document(student_uuid).set(
+    result = (
+        db.collection("student")
+        .document(student_uuid)
+        .set(
+            {
+                "available": False,
+                "email": student_email,
+                "name": student_name,
+                "password_hash": hash_password,
+                "subject": [],
+                "uuid": student_uuid,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    )
+    secret = str(uuid.uuid4())
+    expired = datetime.fromtimestamp(result.update_time.timestamp(), tz=timezone.utc)
+    expired = expired + timedelta(minutes=10)
+    db.collection("student").document(student_uuid).update(
         {
-            "available": False,
-            "email": student_email,
-            "name": student_name,
-            "password_hash": hash_password,
-            "subject": [],
-            "uuid": student_uuid,
-            "created_at": firestore.SERVER_TIMESTAMP,
+            "secret": {"secret": secret, "expired_at": expired},
         }
     )
-    # requests.post("https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",headers="Content-Type: application/json",json={"body":"ボディ","email":student_email,"subject":"メールアドレス認証"})
+    message = message = veri_message.format(
+        role="student", uuid=student_uuid, secret=secret
+    )
+    resquest_json = {
+        "body": message,
+        "email": student_email,
+        "subject": "メールアドレス認証",
+    }
+    requests.post(
+        "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
+        headers={"Content-Type": "application/json"},
+        json=resquest_json,
+    )
     return jsonify({"message": "success", "email": student_email}), 200
 
 
@@ -805,8 +898,19 @@ def student_forget():
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
     )
-    url = "https://student/forget/:uuid?secret=" + secret
-    # requests.post(url,headers="Content-Type: application/json",json={"body":"ボディ","email":student_email,"subject":"パスワード変更"})
+    message = forget_message.format(
+        role="student", uuid=student_data.get("uuid"), secret=secret
+    )
+    resquest_json = {
+        "body": message,
+        "email": student_email,
+        "subject": "パスワード変更",
+    }
+    requests.post(
+        "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
+        headers={"Content-Type": "application/json"},
+        json=resquest_json,
+    )
     return jsonify({"message": "success"}), 200
 
 
@@ -843,6 +947,31 @@ def student_forget_password(uuid):
             "token": firestore.DELETE_FIELD,
             "secret": firestore.DELETE_FIELD,
         }
+    )
+    return jsonify({"message": "success"}), 200
+
+
+@app.route("/student/<string:uuid>/available/", methods=["POST"])
+def student_available(uuid):
+    request_json = request.get_json()
+    request_secret = request_json.get("secret")
+    if request_secret == None:
+        return jsonify({"message": "secretがありません。"}), 400
+
+    student_secret = db.collection("student").document(uuid).get().get("secret")
+    secret_secret = student_secret.get("secret")
+    if request_secret != secret_secret:
+        return jsonify({"message": "間違ったsecret"}), 400
+
+    now = datetime.now()
+    teacher_expired = student_secret.get("expired_at")
+    expired_datetime = datetime.fromtimestamp(teacher_expired.timestamp())
+    sub_time = expired_datetime - now
+    if sub_time.total_seconds() < 0:
+        return jsonify({"message": "期限切れのsecret"}), 400
+
+    db.collection("student").document(uuid).update(
+        {"available": True, "updated_at": firestore.SERVER_TIMESTAMP}
     )
     return jsonify({"message": "success"}), 200
 
