@@ -642,18 +642,44 @@ def student_signup():
     b_password = bytes(teacher_password, "utf-8")
     salt = bcrypt.gensalt(rounds=12, prefix=b"2b")
     hash_password = bcrypt.hashpw(b_password, salt)
-    db.collection("student").document(student_uuid).set(
+    result = (
+        db.collection("student")
+        .document(student_uuid)
+        .set(
+            {
+                "available": False,
+                "email": student_email,
+                "name": student_name,
+                "password_hash": hash_password,
+                "subject": [],
+                "uuid": student_uuid,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    )
+    secret = str(uuid.uuid4())
+    print(str(result.update_time))
+    expired = datetime.fromtimestamp(result.update_time.timestamp())
+    expired = expired + timedelta(minutes=10)
+    db.collection("student").document(student_uuid).update(
         {
-            "available": False,
-            "email": student_email,
-            "name": student_name,
-            "password_hash": hash_password,
-            "subject": [],
-            "uuid": student_uuid,
-            "created_at": firestore.SERVER_TIMESTAMP,
+            "secret": {"secret": secret, "expired_at": expired},
         }
     )
-    # requests.post("https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",headers="Content-Type: application/json",json={"body":"ボディ","email":student_email,"subject":"メールアドレス認証"})
+    message = f"""
+    認証用リンク
+    http://localhost:3000/student/available/{student_uuid}?secret={secret}
+    """
+    response_json = {
+        "body": message,
+        "email": student_email,
+        "subject": "メールアドレス認証",
+    }
+    requests.post(
+        "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
+        headers={"Content-Type": "application/json"},
+        json=response_json,
+    )
     return jsonify({"message": "success", "email": student_email}), 200
 
 
