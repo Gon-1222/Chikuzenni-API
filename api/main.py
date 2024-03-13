@@ -873,6 +873,31 @@ def student_forget_password(uuid):
     return jsonify({"message": "success"}), 200
 
 
+@app.route("/student/<string:uuid>/available/", methods=["POST"])
+def student_available(uuid):
+    request_json = request.get_json()
+    request_secret = request_json.get("secret")
+    if request_secret == None:
+        return jsonify({"message": "secretがありません。"}), 400
+
+    student_secret = db.collection("student").document(uuid).get().get("secret")
+    secret_secret = student_secret.get("secret")
+    if request_secret != secret_secret:
+        return jsonify({"message": "間違ったsecret"}), 400
+
+    now = datetime.now()
+    teacher_expired = student_secret.get("expired_at")
+    expired_datetime = datetime.fromtimestamp(teacher_expired.timestamp())
+    sub_time = expired_datetime - now
+    if sub_time.total_seconds() < 0:
+        return jsonify({"message": "期限切れのsecret"}), 400
+
+    db.collection("student").document(uuid).update(
+        {"available": True, "updated_at": firestore.SERVER_TIMESTAMP}
+    )
+    return jsonify({"message": "success"}), 200
+
+
 # subject側POST
 @app.route("/subject/<string:uuid>/add_student/", methods=["POST"])
 def add_student(uuid):
