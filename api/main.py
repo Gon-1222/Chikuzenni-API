@@ -42,13 +42,28 @@ email_pattern = "^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 pass_pattern = "^(?=.[A-Z])(?=.[-!\"#$%&'()+,./:;<=>?@[\]^_`{|}~])[A-Za-z0-9-!\"#$%&'()+,./:;<=>?@[\]^_`{|}~]{8,72}$"
 
 veri_message = """
-    認証用リンク
-    http://localhost:3000/{role}/available/{uuid}?secret={secret}
+    「筑前煮」にご登録いただき有り難うございます。
+    下記のリンクから本登録を完了させて下さい。
+    https://chikuzenni.vercel.app/{role}/available/{uuid}?secret={secret}
+    このリンクは、10 分間有効です。
+    本登録完了後、ログインいただくことで「筑前煮」の全機能がご利用いただけます。
+
+    ---------------------------------
+    ご不明な点等ございましたら下記メールアドレスまでお問い合わせ下さい。
+    chikuzen.info@gmail.com
+    ---------------------------------
     """
 
 forget_message = """
-    パスワード忘れた場合
-    http://localhost:3000/{role}/forget/{uuid}?secret={secret}
+    「筑前煮」をご利用いただきありがとうございます。
+    下記のリンクよりパスワードの再設定を行って下さい。
+    https://chikuzenni.vercel.app/{role}/forget/{uuid}?secret={secret}
+    このリンクは、10 分間有効です。
+
+    ---------------------------------
+    ご不明な点等ございましたら下記メールアドレスまでお問い合わせ下さい。
+    chikuzen.info@gmail.com
+    ---------------------------------
     """
 
 
@@ -302,7 +317,7 @@ def teacher_signup():
     resquest_json = {
         "body": message,
         "email": teacher_email,
-        "subject": "メールアドレス認証",
+        "subject": "【筑前煮】本登録のご案内",
     }
     requests.post(
         "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
@@ -404,7 +419,7 @@ def teacher_forget():
     resquest_json = {
         "body": message,
         "email": teacher_email,
-        "subject": "パスワード変更",
+        "subject": "【筑前煮】パスワード変更",
     }
     requests.post(
         "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
@@ -740,7 +755,7 @@ def student_signup():
     resquest_json = {
         "body": message,
         "email": student_email,
-        "subject": "メールアドレス認証",
+        "subject": "【筑前煮】本登録のご案内",
     }
     requests.post(
         "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
@@ -904,7 +919,7 @@ def student_forget():
     resquest_json = {
         "body": message,
         "email": student_email,
-        "subject": "パスワード変更",
+        "subject": "【筑前煮】パスワード変更",
     }
     requests.post(
         "https://script.google.com/macros/s/AKfycby4a8UMh_gJZuO2I10zAK2_q2AUoAfuhGJxJS8ZrD_8AkAbd9TarFjd9jqsL1geryk/exec",
